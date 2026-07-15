@@ -8,38 +8,47 @@ export interface QueueClientConfig {
   readonly url: string;
 
   /**
-   * Connection name shown in the RabbitMQ management UI.
+   * Name displayed in the RabbitMQ Management UI.
    */
   readonly connectionName?: string;
 
   /**
    * Heartbeat interval in seconds.
-   *
-   * Defaults to RabbitMQ's negotiated value when omitted.
    */
   readonly heartbeat?: number;
 
   /**
-   * Maximum number of reconnect attempts.
+   * Maximum reconnect attempts.
    *
-   * Undefined means retry indefinitely.
+   * Undefined means retry forever.
    */
   readonly maxReconnectAttempts?: number;
 
   /**
    * Initial reconnect delay in milliseconds.
+   *
+   * @default 1000
    */
   readonly reconnectDelay?: number;
 
   /**
    * Maximum reconnect delay in milliseconds.
+   *
+   * @default 30000
    */
   readonly maxReconnectDelay?: number;
 
   /**
-   * Enable publisher confirms.
+   * Automatically create queues that don't exist.
    *
-   * Defaults to true.
+   * @default true
    */
-  readonly confirmPublish?: boolean;
+  readonly autoCreateQueues?: boolean;
+
+  /**
+   * Automatically recreate queues after reconnect.
+   *
+   * @default true
+   */
+  readonly autoRecover?: boolean;
 }
