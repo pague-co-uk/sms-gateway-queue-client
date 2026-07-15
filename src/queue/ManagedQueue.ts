@@ -5,27 +5,45 @@ import type {
   Replies,
 } from "amqplib";
 
-import { ConnectionManager } from "../connection/ConnectionManager.js";
+import { ChannelManager } from "../channel/ChannelManager.js";
 
 export class ManagedQueue {
-  private channel: ConfirmChannel | null = null;
+  private readonly channelManager: ChannelManager;
+
+  private readonly queueOptions: Options.AssertQueue;
+
+  private consumer:
+    | {
+        tag?: string;
+        handler: (message: unknown) => Promise<void> | void;
+        options?: Options.Consume;
+      }
+    | undefined;
+
+  private closing = false;
 
   constructor(
     private readonly name: string,
-    private readonly connectionManager: ConnectionManager,
-  ) {}
-
-  public get queue(): string {
-    return this.name;
+    createChannel: () => Promise<ConfirmChannel>,
+    options: Options.AssertQueue = {
+      durable: true,
+    },
+  ) {
+    this.channelManager = new ChannelManager(createChannel);
+    this.queueOptions = options;
   }
 
   public async publish<T>(
     message: T,
     options?: Options.Publish,
   ): Promise<boolean> {
-    const channel = await this.getChannel();
+    if (this.closing) {
+      throw new Error(`Queue '${this.name}' is shutting down.`);
+    }
 
-    return channel.publish(
+    const channel = await this.channelManager.getChannel();
+
+    const published = channel.publish(
       "",
       this.name,
       Buffer.from(JSON.stringify(message)),
@@ -35,46 +53,94 @@ export class ManagedQueue {
         ...options,
       },
     );
+
+    await channel.waitForConfirms();
+
+    return published;
   }
 
   public async subscribe<T>(
     handler: (message: T) => Promise<void> | void,
     options?: Options.Consume,
   ): Promise<Replies.Consume> {
-    const channel = await this.getChannel();
+    this.consumer = {
+      handler: handler as (message: unknown) => Promise<void> | void,
+    };
 
-    return channel.consume(
+    if (options) {
+      this.consumer.options = options;
+    }
+
+    return this.startConsumer();
+  }
+
+  public invalidate(): void {
+    this.channelManager.invalidate();
+  }
+
+  public async recover(): Promise<void> {
+    this.channelManager.invalidate();
+
+    const channel = await this.channelManager.getChannel();
+
+    await channel.assertQueue(
+      this.name,
+      this.queueOptions,
+    );
+
+    if (this.consumer) {
+      await this.startConsumer();
+    }
+  }
+
+  public async close(): Promise<void> {
+    if (this.closing) {
+      return;
+    }
+
+    this.closing = true;
+
+    const channel = await this.channelManager.getChannel();
+
+    if (this.consumer?.tag) {
+      await channel.cancel(this.consumer.tag);
+    }
+
+    await this.channelManager.close();
+
+    this.closing = false;
+  }
+
+  private async startConsumer(): Promise<Replies.Consume> {
+    if (!this.consumer) {
+      throw new Error("No consumer has been registered.");
+    }
+
+    const channel = await this.channelManager.getChannel();
+
+    await channel.assertQueue(
+      this.name,
+      this.queueOptions,
+    );
+
+    const reply = await channel.consume(
       this.name,
       async (message: ConsumeMessage | null) => {
         if (!message) {
           return;
         }
 
-        const payload = JSON.parse(
-          message.content.toString(),
-        ) as T;
+        const payload = JSON.parse(message.content.toString());
 
-        await handler(payload);
+        await this.consumer!.handler(payload);
 
         channel.ack(message);
       },
-      options,
+      this.consumer.options,
     );
-  }
 
-  private async getChannel(): Promise<ConfirmChannel> {
-    if (this.channel) {
-      return this.channel;
-    }
+    this.consumer.tag = reply.consumerTag;
 
-    this.channel = await this.connectionManager
-      .getConnection()
-      .createConfirmChannel();
-
-    await this.channel.assertQueue(this.name, {
-      durable: true,
-    });
-
-    return this.channel;
+    return reply;
   }
 }

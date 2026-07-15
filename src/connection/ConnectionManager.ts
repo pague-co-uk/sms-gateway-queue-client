@@ -1,4 +1,8 @@
-import { connect, type ChannelModel } from "amqplib";
+import {
+  connect,
+  type ChannelModel,
+  type ConfirmChannel,
+} from "amqplib";
 
 import type { QueueClientConfig } from "../config/QueueClientConfig.js";
 
@@ -7,15 +11,7 @@ export class ConnectionManager {
 
   constructor(
     private readonly config: QueueClientConfig,
-  ) {}
-
-  public getConnection(): ChannelModel {
-    if (!this.connection) {
-      throw new Error("RabbitMQ is not connected.");
-    }
-
-    return this.connection;
-  }
+  ) { }
 
   public get connected(): boolean {
     return this.connection !== null;
@@ -27,11 +23,19 @@ export class ConnectionManager {
     }
 
     this.connection = await connect(this.config.url, {
+      heartbeat: this.config.heartbeat,
       clientProperties: {
         connection_name: this.config.connectionName,
       },
-      heartbeat: this.config.heartbeat,
     });
+  }
+
+  public async createConfirmChannel(): Promise<ConfirmChannel> {
+    if (!this.connection) {
+      throw new Error("RabbitMQ connection has not been established.");
+    }
+
+    return this.connection.createConfirmChannel();
   }
 
   public async close(): Promise<void> {
@@ -40,6 +44,23 @@ export class ConnectionManager {
     }
 
     await this.connection.close();
+
     this.connection = null;
+  }
+
+  public onClose(listener: () => void): void {
+    if (!this.connection) {
+      throw new Error("RabbitMQ connection has not been established.");
+    }
+
+    this.connection.on("close", listener);
+  }
+
+  public onError(listener: (error: Error) => void): void {
+    if (!this.connection) {
+      throw new Error("RabbitMQ connection has not been established.");
+    }
+
+    this.connection.on("error", listener);
   }
 }

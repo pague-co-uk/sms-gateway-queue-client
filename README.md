@@ -2,27 +2,32 @@
 
 A lightweight, production-ready, framework-agnostic RabbitMQ client for Node.js.
 
-This package provides a simple, opinionated API for publishing and consuming messages without exposing the complexity of RabbitMQ's connection, channel, and topology management.
+The package provides a simple queue-based API for publishing and consuming messages while transparently handling RabbitMQ connections, channels, queue creation and automatic recovery.
 
 ---
 
-## Features
+# Features
 
 - Framework agnostic
 - Node.js 22+
 - TypeScript first
 - ESM only
+- Strongly typed API
 - Automatic queue declaration
-- Persistent messages by default
-- JSON serialization/deserialization
-- Queue-based API
+- Automatic connection recovery
+- Automatic queue recovery
+- Exponential reconnect backoff
 - One managed channel per queue
-- Strong typing
+- Publisher confirms
+- Persistent messages by default
+- JSON serialization
+- JSON deserialization
+- Graceful shutdown
 - Minimal public API
 
 ---
 
-## Philosophy
+# Philosophy
 
 Applications should think in terms of queues—not RabbitMQ.
 
@@ -30,24 +35,26 @@ Instead of managing:
 
 - Connections
 - Channels
-- Exchanges
-- Queue declarations
-- Bindings
 - Confirm channels
+- Queue declarations
+- Recovery
+- Reconnection
+- Serialization
 
-Applications simply publish to and subscribe from queues.
-
-Example:
+Applications simply publish and subscribe.
 
 ```ts
 await client.publish("sms.submit", message);
 
-await client.subscribe("sms.submit", async (message) => {
-    // process message
-});
+await client.subscribe(
+    "sms.submit",
+    async (message) => {
+        // process message
+    },
+);
 ```
 
-The package owns the RabbitMQ implementation details.
+The package owns the RabbitMQ infrastructure.
 
 ---
 
@@ -62,7 +69,9 @@ npm install @pague-co-uk/sms-gateway-queue-client
 # Quick Start
 
 ```ts
-import { createQueueClient } from "@pague-co-uk/sms-gateway-queue-client";
+import {
+    createQueueClient,
+} from "@pague-co-uk/sms-gateway-queue-client";
 
 const client = createQueueClient({
     url: process.env.RABBITMQ_URL!,
@@ -70,11 +79,14 @@ const client = createQueueClient({
 
 await client.connect();
 
-await client.publish("sms.submit", {
-    id: "123",
-    recipient: "+265991234567",
-    text: "Hello World",
-});
+await client.publish(
+    "sms.submit",
+    {
+        id: "123",
+        recipient: "+265991234567",
+        text: "Hello World",
+    },
+);
 
 await client.close();
 ```
@@ -84,7 +96,11 @@ await client.close();
 # Consuming Messages
 
 ```ts
-import { createQueueClient } from "@pague-co-uk/sms-gateway-queue-client";
+interface SmsMessage {
+    id: string;
+    recipient: string;
+    text: string;
+}
 
 const client = createQueueClient({
     url: process.env.RABBITMQ_URL!,
@@ -95,18 +111,19 @@ await client.connect();
 await client.subscribe<SmsMessage>(
     "sms.submit",
     async (message) => {
-        console.log(message);
+        console.log(message.recipient);
+        console.log(message.text);
     },
 );
 ```
 
 ---
 
-# API
+# Public API
 
 ## createQueueClient()
 
-Creates a new QueueClient instance.
+Creates a new queue client.
 
 ```ts
 const client = createQueueClient(config);
@@ -118,17 +135,19 @@ const client = createQueueClient(config);
 
 ## connect()
 
-Establishes a connection to RabbitMQ.
+Establishes the RabbitMQ connection.
 
 ```ts
 await client.connect();
 ```
 
+If RabbitMQ later becomes unavailable, the client automatically attempts to reconnect in the background.
+
 ---
 
 ## publish()
 
-Publishes a strongly typed message to a queue.
+Publishes a strongly typed message.
 
 ```ts
 await client.publish<T>(
@@ -141,12 +160,12 @@ await client.publish<T>(
 ### Parameters
 
 | Name | Type | Description |
-|-------|------|-------------|
+|------|------|-------------|
 | queue | string | Queue name |
 | message | T | Message payload |
-| options | PublishOptions | Optional RabbitMQ publish options |
+| options | Options.Publish | RabbitMQ publish options |
 
-### Example
+Example
 
 ```ts
 await client.publish<OrderCreated>(
@@ -159,7 +178,7 @@ await client.publish<OrderCreated>(
 
 ## subscribe()
 
-Subscribes to a queue.
+Registers a consumer.
 
 ```ts
 await client.subscribe<T>(
@@ -173,10 +192,10 @@ await client.subscribe<T>(
 ### Parameters
 
 | Name | Type | Description |
-|-------|------|-------------|
+|------|------|-------------|
 | queue | string | Queue name |
 | handler | Function | Message handler |
-| options | ConsumeOptions | Optional RabbitMQ consume options |
+| options | Options.Consume | RabbitMQ consume options |
 
 Example
 
@@ -191,9 +210,46 @@ await client.subscribe<OrderCreated>(
 
 ---
 
+## connected
+
+Returns whether the client currently has an active RabbitMQ connection.
+
+```ts
+if (client.connected) {
+
+}
+```
+
+---
+
+## currentState
+
+Returns the current connection state.
+
+```ts
+console.log(client.currentState);
+```
+
+Possible values:
+
+- DISCONNECTED
+- CONNECTING
+- CONNECTED
+- RECONNECTING
+- CLOSED
+
+---
+
 ## close()
 
-Gracefully closes the RabbitMQ connection.
+Gracefully shuts down the client.
+
+Shutdown sequence:
+
+1. Stop all consumers.
+2. Close all managed channels.
+3. Close the RabbitMQ connection.
+4. Mark the client as closed.
 
 ```ts
 await client.close();
@@ -211,58 +267,171 @@ interface QueueClientConfig {
 
     heartbeat?: number;
 
-    maxReconnectAttempts?: number;
-
     reconnectDelay?: number;
 
     maxReconnectDelay?: number;
 
-    autoCreateQueues?: boolean;
-
-    autoRecover?: boolean;
+    maxReconnectAttempts?: number;
 }
+```
+
+## url
+
+RabbitMQ connection string.
+
+Example
+
+```text
+amqp://guest:guest@localhost:5672
 ```
 
 ---
 
-# Queue Management
+## connectionName
 
-The package internally manages queues.
+Optional name shown in the RabbitMQ Management UI.
 
-Each logical queue owns:
+Example
 
-- Confirm channel
-- Queue declaration
-- JSON serialization
-- JSON deserialization
+```ts
+connectionName: "sms-gateway-api"
+```
+
+---
+
+## heartbeat
+
+Heartbeat interval in seconds.
+
+Example
+
+```ts
+heartbeat: 60
+```
+
+---
+
+## reconnectDelay
+
+Initial reconnect delay in milliseconds.
+
+Default
+
+```text
+1000
+```
+
+---
+
+## maxReconnectDelay
+
+Maximum reconnect delay.
+
+Default
+
+```text
+30000
+```
+
+---
+
+## maxReconnectAttempts
+
+Maximum reconnect attempts.
+
+If omitted, the client retries indefinitely.
+
+---
+
+# Automatic Queue Declaration
+
+Queues are created automatically when first used.
+
+No manual setup is required.
+
+```ts
+await client.publish(
+    "sms.submit",
+    message,
+);
+```
+
+internally performs
+
+```text
+assertQueue()
+
+↓
+
+publish()
+```
+
+The queue is declared only once and then reused.
+
+---
+
+# Automatic Recovery
+
+The client automatically detects RabbitMQ connection failures.
+
+Recovery process:
+
+```text
+Connection Lost
+        │
+        ▼
+Reconnect
+        │
+        ▼
+Replace Connection
+        │
+        ▼
+Recover Managed Queues
+        │
+        ▼
+Resume Consumers
+```
+
+No application code is required.
+
+---
+
+# Queue Recovery
+
+Each managed queue remembers:
+
+- Queue name
+- Queue configuration
 - Consumer
-- Publisher
+- Consumer options
 
-Applications never interact with these objects directly.
+After reconnect, every queue automatically rebuilds itself.
+
+Applications do not need to resubscribe.
 
 ---
 
 # Serialization
 
-Messages are automatically serialized as JSON before publishing.
+Messages are automatically serialized before publishing.
 
 ```ts
 await client.publish(
     "notifications",
     {
         id: "1",
-        message: "Hello"
-    }
+        text: "Hello",
+    },
 );
 ```
 
-Internally this becomes
+Internally
 
 ```ts
 Buffer.from(JSON.stringify(message))
 ```
 
-Likewise, consumed messages are automatically deserialized before being passed to the handler.
+Incoming messages are automatically deserialized.
 
 ---
 
@@ -282,87 +451,168 @@ or
 subscribe()
 ```
 
-creates and initializes the queue.
+creates the managed queue.
 
-Subsequent operations reuse the existing managed queue and channel.
+The queue then owns:
+
+- Queue configuration
+- Consumer
+- Managed channel
+
+and survives reconnects automatically.
 
 ---
 
-# Design Principles
+# Design
 
-The package intentionally hides RabbitMQ implementation details.
+Internally the package is composed of four primary components.
 
-Applications should never need to know about:
+```text
+QueueClient
+    │
+    ├── ConnectionManager
+    │
+    └── ManagedQueue
+            │
+            └── ChannelManager
+```
 
-- Connections
-- Channels
-- Confirm channels
+## QueueClient
+
+Responsible for:
+
+- Client lifecycle
+- Connection supervision
+- Queue registry
+- Recovery orchestration
+- Graceful shutdown
+
+---
+
+## ConnectionManager
+
+Responsible for:
+
+- RabbitMQ connection
+- Creating confirm channels
+
+---
+
+## ManagedQueue
+
+Responsible for:
+
 - Queue declaration
-- Exchange declaration
-- Queue bindings
-- Serialization
-- Channel lifecycle
-
-These are considered infrastructure concerns.
+- Publishing
+- Consuming
+- Queue recovery
+- Queue configuration
 
 ---
 
-# Current Implementation
+## ChannelManager
 
-The current implementation provides:
+Responsible for:
+
+- Channel lifecycle
+- Lazy channel creation
+- Channel invalidation
+- Channel shutdown
+
+---
+
+# Connection States
+
+```text
+DISCONNECTED
+
+↓
+
+CONNECTING
+
+↓
+
+CONNECTED
+
+↓
+
+RECONNECTING
+
+↓
+
+CONNECTED
+```
+
+Closing the client transitions to
+
+```text
+CLOSED
+```
+
+after which no further operations are permitted.
+
+---
+
+# Error Handling
+
+Publishing or subscribing on a closed client throws an error.
+
+```ts
+Queue client is closed.
+```
+
+Connection failures are automatically handled through background reconnect attempts.
+
+---
+
+# Current Capabilities
 
 - Queue publishing
 - Queue subscription
-- Automatic queue creation
+- Automatic queue declaration
+- Automatic reconnect
+- Queue recovery
+- Exponential reconnect backoff
+- Publisher confirms
 - JSON serialization
 - JSON deserialization
-- One managed channel per queue
+- Graceful shutdown
 
 ---
 
-# Planned Features
+# Future Enhancements
 
-Future versions will add:
+Potential future additions include:
 
-- Automatic reconnect
-- Automatic topology recovery
-- Publisher confirms
+- Exchange support
 - Dead-letter queues
-- Retry support
+- Retry infrastructure
 - RPC
-- Prefetch configuration
-- Consumer acknowledgements
-- Message headers
-- Delayed delivery
-- Queue metrics
+- Message scheduling
+- Queue administration
+- Metrics
+- Health checks
 
-These features will be added without changing the public API.
+These will be added without changing the existing public API.
 
 ---
 
-# Example
-
-Publisher
+# Complete Example
 
 ```ts
+import {
+    createQueueClient,
+} from "@pague-co-uk/sms-gateway-queue-client";
+
+interface SmsMessage {
+    id: string;
+    recipient: string;
+    text: string;
+}
+
 const client = createQueueClient({
     url: process.env.RABBITMQ_URL!,
-});
-
-await client.connect();
-
-await client.publish("sms.submit", {
-    id: "1",
-    destination: "+265991234567",
-    text: "Hello"
-});
-```
-
-Consumer
-
-```ts
-const client = createQueueClient({
-    url: process.env.RABBITMQ_URL!,
+    connectionName: "sms-gateway-api",
 });
 
 await client.connect();
@@ -370,9 +620,22 @@ await client.connect();
 await client.subscribe<SmsMessage>(
     "sms.submit",
     async (message) => {
-        console.log(message.destination);
+        console.log(message);
     },
 );
+
+await client.publish<SmsMessage>(
+    "sms.submit",
+    {
+        id: "1",
+        recipient: "+265991234567",
+        text: "Hello World",
+    },
+);
+
+// ...
+
+await client.close();
 ```
 
 ---
