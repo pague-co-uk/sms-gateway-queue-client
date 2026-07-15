@@ -1,6 +1,6 @@
 {
   "name": "@pague-co-uk/sms-gateway-queue-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Framework-agnostic RabbitMQ client for the Pague SMS Gateway platform.",
   "license": "MIT",
   "author": "Pague UK",
