@@ -2,16 +2,18 @@ import { defineConfig } from "tsup";
 
 export default defineConfig({
   entry: ["src/index.ts"],
+
+  bundle: true,
+
   format: ["esm"],
-  target: "node22",
-  platform: "node",
-  sourcemap: true,
+
   dts: true,
-  clean: true,
+
   splitting: false,
-  treeshake: true,
-  minify: false,
-  bundle: false,
-  outDir: "dist",
+
+  clean: true,
+
+  sourcemap: true,
+
   external: ["amqplib"],
 });
