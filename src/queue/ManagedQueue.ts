@@ -113,57 +113,33 @@ export class ManagedQueue {
 
   private async startConsumer(): Promise<Replies.Consume> {
     if (!this.consumer) {
-      throw new Error(
-        "No consumer has been registered.",
-      );
+      throw new Error("No consumer has been registered.");
     }
 
-    const channel =
-      await this.channelManager.getChannel();
+    const channel = await this.channelManager.getChannel();
 
     await channel.assertQueue(
       this.name,
       this.queueOptions,
     );
 
-    const reply =
-      await channel.consume(
-        this.name,
-        async (
-          message: ConsumeMessage | null,
-        ) => {
-          if (!message) {
-            return;
-          }
+    const reply = await channel.consume(
+      this.name,
+      async (message: ConsumeMessage | null) => {
+        if (!message) {
+          return;
+        }
 
-          try {
-            const payload =
-              JSON.parse(
-                message.content.toString(),
-              );
+        const payload = JSON.parse(message.content.toString());
 
-            await this.consumer!.handler(
-              payload,
-            );
+        await this.consumer!.handler(payload);
 
-            channel.ack(
-              message,
-            );
-          } catch (error) {
-            channel.nack(
-              message,
-              false,
-              true,
-            );
+        channel.ack(message);
+      },
+      this.consumer.options,
+    );
 
-            throw error;
-          }
-        },
-        this.consumer.options,
-      );
-
-    this.consumer.tag =
-      reply.consumerTag;
+    this.consumer.tag = reply.consumerTag;
 
     return reply;
   }
