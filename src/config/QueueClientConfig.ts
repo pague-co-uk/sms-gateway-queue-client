@@ -39,13 +39,6 @@ export interface QueueClientConfig {
   readonly maxReconnectDelay?: number;
 
   /**
-   * Automatically create queues that don't exist.
-   *
-   * @default true
-   */
-  readonly autoCreateQueues?: boolean;
-
-  /**
    * Automatically recreate queues after reconnect.
    *
    * @default true

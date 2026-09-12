@@ -41,18 +41,28 @@ export class ManagedQueue {
       throw new Error(`Queue '${this.name}' is shutting down.`);
     }
 
-    const channel = await this.channelManager.getChannel();
+    const channel =
+      await this.channelManager.getChannel();
 
-    const published = channel.publish(
-      "",
+    await channel.assertQueue(
       this.name,
-      Buffer.from(JSON.stringify(message)),
-      {
-        persistent: true,
-        contentType: "application/json",
-        ...options,
-      },
+      this.queueOptions,
     );
+
+    const published =
+      channel.publish(
+        "",
+        this.name,
+        Buffer.from(
+          JSON.stringify(message),
+        ),
+        {
+          persistent: true,
+          contentType:
+            "application/json",
+          ...options,
+        },
+      );
 
     await channel.waitForConfirms();
 

@@ -194,7 +194,6 @@ interface QueueClientConfig {
   readonly maxReconnectAttempts?: number;
   readonly reconnectDelay?: number;
   readonly maxReconnectDelay?: number;
-  readonly autoCreateQueues?: boolean;
   readonly autoRecover?: boolean;
 }
 ```
@@ -221,7 +220,6 @@ No exceptions are thrown directly.
 | `maxReconnectAttempts` | `number` | No | Maximum reconnect attempts. Omit for unlimited retries. |
 | `reconnectDelay` | `number` | No | Initial reconnect delay in milliseconds. Defaults to `1000` in the implementation. |
 | `maxReconnectDelay` | `number` | No | Maximum reconnect delay in milliseconds. Defaults to `30000` in the implementation. |
-| `autoCreateQueues` | `boolean` | No | Declared option for automatically creating queues; the current implementation does not read it. |
 | `autoRecover` | `boolean` | No | Declared option for automatic recovery; the current implementation reconnects/recover queues regardless of this value. |
 
 ### Example
@@ -241,7 +239,7 @@ const config: QueueClientConfig = {
 
 ### Best Practices
 
-Provide the URL through secure environment configuration and give each process a clear connection name. Set a finite reconnect limit only when the application can safely degrade after RabbitMQ is unavailable. Do not rely on `autoCreateQueues` or `autoRecover` to change current behavior until the implementation consumes those options.
+Provide the URL through secure environment configuration and give each process a clear connection name. Set a finite reconnect limit only when the application can safely degrade after RabbitMQ is unavailable.
 
 ### Related APIs
 
