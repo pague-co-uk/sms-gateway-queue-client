@@ -1,23 +1,46 @@
-import type { Options, Replies } from "amqplib";
+import type {
+  Options,
+  Replies,
+} from "amqplib";
 
-import type { QueueClientConfig } from "../config/QueueClientConfig.js";
-import { ConnectionManager } from "../connection/ConnectionManager.js";
-import { ManagedQueue } from "../queue/ManagedQueue.js";
-import { QueueClientState } from "./QueueClientState.js";
+import type {
+  QueueClientConfig,
+} from "../config/QueueClientConfig.js";
+
+import {
+  ConnectionManager,
+} from "../connection/ConnectionManager.js";
+
+import {
+  ManagedQueue,
+  type QueueSubscribeOptions,
+} from "../queue/ManagedQueue.js";
+
+import {
+  QueueClientState,
+} from "./QueueClientState.js";
 
 export class QueueClient {
   private connectionManager: ConnectionManager;
 
-  private readonly queues = new Map<string, ManagedQueue>();
+  private readonly queues =
+    new Map<string, ManagedQueue>();
 
-  private state = QueueClientState.DISCONNECTED;
+  private state =
+    QueueClientState.DISCONNECTED;
 
-  constructor(private readonly config: QueueClientConfig) {
-    this.connectionManager = new ConnectionManager(config);
+  constructor(
+    private readonly config: QueueClientConfig,
+  ) {
+    this.connectionManager =
+      new ConnectionManager(config);
   }
 
   public get connected(): boolean {
-    return this.state === QueueClientState.CONNECTED;
+    return (
+      this.state ===
+      QueueClientState.CONNECTED
+    );
   }
 
   public get currentState(): QueueClientState {
@@ -25,20 +48,26 @@ export class QueueClient {
   }
 
   public async connect(): Promise<void> {
-    if (this.state !== QueueClientState.DISCONNECTED) {
+    if (
+      this.state !==
+      QueueClientState.DISCONNECTED
+    ) {
       return;
     }
 
-    this.state = QueueClientState.CONNECTING;
+    this.state =
+      QueueClientState.CONNECTING;
 
     try {
       await this.connectionManager.connect();
 
-      this.state = QueueClientState.CONNECTED;
+      this.state =
+        QueueClientState.CONNECTED;
 
       this.registerConnectionHandlers();
     } catch (error) {
-      this.state = QueueClientState.DISCONNECTED;
+      this.state =
+        QueueClientState.DISCONNECTED;
 
       throw error;
     }
@@ -49,34 +78,62 @@ export class QueueClient {
     message: T,
     options?: Options.Publish,
   ): Promise<boolean> {
-    if (this.state === QueueClientState.CLOSED) {
-      throw new Error("Queue client is closed.");
+    if (
+      this.state ===
+      QueueClientState.CLOSED
+    ) {
+      throw new Error(
+        "Queue client is closed.",
+      );
     }
 
-    return this.getQueue(queueName).publish(message, options);
+    return this.getQueue(
+      queueName,
+    ).publish(
+      message,
+      options,
+    );
   }
 
   public async subscribe<T>(
     queueName: string,
-    handler: (message: T) => Promise<void> | void,
-    options?: Options.Consume,
+    handler: (
+      message: T,
+    ) => Promise<void> | void,
+    options?: QueueSubscribeOptions,
   ): Promise<Replies.Consume> {
-    if (this.state === QueueClientState.CLOSED) {
-      throw new Error("Queue client is closed.");
+    if (
+      this.state ===
+      QueueClientState.CLOSED
+    ) {
+      throw new Error(
+        "Queue client is closed.",
+      );
     }
 
-    return this.getQueue(queueName).subscribe(handler, options);
+    return this.getQueue(
+      queueName,
+    ).subscribe(
+      handler,
+      options,
+    );
   }
 
   public async close(): Promise<void> {
-    if (this.state === QueueClientState.CLOSED) {
+    if (
+      this.state ===
+      QueueClientState.CLOSED
+    ) {
       return;
     }
 
-    this.state = QueueClientState.CLOSED;
+    this.state =
+      QueueClientState.CLOSED;
 
     await Promise.all(
-      [...this.queues.values()].map((queue) => queue.close()),
+      [...this.queues.values()].map(
+        (queue) => queue.close(),
+      ),
     );
 
     this.queues.clear();
@@ -84,81 +141,129 @@ export class QueueClient {
     await this.connectionManager.close();
   }
 
-  private getQueue(name: string): ManagedQueue {
-    let queue = this.queues.get(name);
+  private getQueue(
+    name: string,
+  ): ManagedQueue {
+    let queue =
+      this.queues.get(name);
 
     if (!queue) {
-      queue = new ManagedQueue(
-        name,
-        () => this.connectionManager.createConfirmChannel(),
-      );
+      queue =
+        new ManagedQueue(
+          name,
+          () =>
+            this.connectionManager
+              .createConfirmChannel(),
+        );
 
-      this.queues.set(name, queue);
+      this.queues.set(
+        name,
+        queue,
+      );
     }
 
     return queue;
   }
 
   private registerConnectionHandlers(): void {
-    this.connectionManager.onClose(() => {
-      if (this.state === QueueClientState.CLOSED) {
-        return;
-      }
+    this.connectionManager.onClose(
+      () => {
+        if (
+          this.state ===
+          QueueClientState.CLOSED
+        ) {
+          return;
+        }
 
-      this.state = QueueClientState.RECONNECTING;
+        this.state =
+          QueueClientState.RECONNECTING;
 
-      void this.reconnect();
-    });
+        void this.reconnect();
+      },
+    );
 
-    this.connectionManager.onError(() => {
-      if (this.state === QueueClientState.CLOSED) {
-        return;
-      }
+    this.connectionManager.onError(
+      () => {
+        if (
+          this.state ===
+          QueueClientState.CLOSED
+        ) {
+          return;
+        }
 
-      this.state = QueueClientState.RECONNECTING;
-    });
+        this.state =
+          QueueClientState.RECONNECTING;
+      },
+    );
   }
 
   private async reconnect(): Promise<void> {
-    let delay = this.config.reconnectDelay ?? 1000;
-    const maxDelay = this.config.maxReconnectDelay ?? 30000;
-    const maxAttempts = this.config.maxReconnectAttempts;
+    let delay =
+      this.config.reconnectDelay ??
+      1000;
+
+    const maxDelay =
+      this.config.maxReconnectDelay ??
+      30000;
+
+    const maxAttempts =
+      this.config.maxReconnectAttempts;
 
     let attempts = 0;
 
-    while (this.state !== QueueClientState.CLOSED) {
+    while (
+      this.state !==
+      QueueClientState.CLOSED
+    ) {
       if (
         maxAttempts !== undefined &&
         attempts >= maxAttempts
       ) {
-        this.state = QueueClientState.DISCONNECTED;
+        this.state =
+          QueueClientState.DISCONNECTED;
+
         return;
       }
 
       try {
-        const connectionManager = new ConnectionManager(this.config);
+        const connectionManager =
+          new ConnectionManager(
+            this.config,
+          );
 
         await connectionManager.connect();
 
-        this.connectionManager = connectionManager;
+        this.connectionManager =
+          connectionManager;
 
         this.registerConnectionHandlers();
 
-        for (const queue of this.queues.values()) {
+        for (
+          const queue of
+          this.queues.values()
+        ) {
           await queue.recover();
         }
 
-        this.state = QueueClientState.CONNECTED;
+        this.state =
+          QueueClientState.CONNECTED;
 
         return;
       } catch {
         attempts++;
 
-        await new Promise((resolve) =>
-          setTimeout(resolve, delay),
+        await new Promise(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              delay,
+            ),
         );
 
-        delay = Math.min(delay * 2, maxDelay);
+        delay = Math.min(
+          delay * 2,
+          maxDelay,
+        );
       }
     }
   }
