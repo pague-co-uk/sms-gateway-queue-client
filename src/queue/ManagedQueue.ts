@@ -5,6 +5,10 @@ import type {
   Replies,
 } from "amqplib";
 
+import {
+  QueueProcessingError,
+} from "../errors/queue-processing.error.js";
+
 import { ChannelManager } from "../channel/ChannelManager.js";
 
 export class ManagedQueue {
@@ -15,7 +19,9 @@ export class ManagedQueue {
   private consumer:
     | {
       tag?: string;
-      handler: (message: unknown) => Promise<void> | void;
+      handler: (
+        message: unknown,
+      ) => Promise<void> | void;
       options?: Options.Consume;
     }
     | undefined;
@@ -29,8 +35,13 @@ export class ManagedQueue {
       durable: true,
     },
   ) {
-    this.channelManager = new ChannelManager(createChannel);
-    this.queueOptions = options;
+    this.channelManager =
+      new ChannelManager(
+        createChannel,
+      );
+
+    this.queueOptions =
+      options;
   }
 
   public async publish<T>(
@@ -38,7 +49,9 @@ export class ManagedQueue {
     options?: Options.Publish,
   ): Promise<boolean> {
     if (this.closing) {
-      throw new Error(`Queue '${this.name}' is shutting down.`);
+      throw new Error(
+        `Queue '${this.name}' is shutting down.`,
+      );
     }
 
     const channel =
@@ -70,15 +83,23 @@ export class ManagedQueue {
   }
 
   public async subscribe<T>(
-    handler: (message: T) => Promise<void> | void,
+    handler: (
+      message: T,
+    ) => Promise<void> | void,
     options?: Options.Consume,
   ): Promise<Replies.Consume> {
     this.consumer = {
-      handler: handler as (message: unknown) => Promise<void> | void,
+      handler:
+        handler as (
+          message: unknown,
+        ) =>
+          | Promise<void>
+          | void,
     };
 
     if (options) {
-      this.consumer.options = options;
+      this.consumer.options =
+        options;
     }
 
     return this.startConsumer();
@@ -91,7 +112,8 @@ export class ManagedQueue {
   public async recover(): Promise<void> {
     this.channelManager.invalidate();
 
-    const channel = await this.channelManager.getChannel();
+    const channel =
+      await this.channelManager.getChannel();
 
     await channel.assertQueue(
       this.name,
@@ -110,10 +132,13 @@ export class ManagedQueue {
 
     this.closing = true;
 
-    const channel = await this.channelManager.getChannel();
+    const channel =
+      await this.channelManager.getChannel();
 
     if (this.consumer?.tag) {
-      await channel.cancel(this.consumer.tag);
+      await channel.cancel(
+        this.consumer.tag,
+      );
     }
 
     await this.channelManager.close();
@@ -123,33 +148,76 @@ export class ManagedQueue {
 
   private async startConsumer(): Promise<Replies.Consume> {
     if (!this.consumer) {
-      throw new Error("No consumer has been registered.");
+      throw new Error(
+        "No consumer has been registered.",
+      );
     }
 
-    const channel = await this.channelManager.getChannel();
+    const channel =
+      await this.channelManager.getChannel();
 
     await channel.assertQueue(
       this.name,
       this.queueOptions,
     );
 
-    const reply = await channel.consume(
-      this.name,
-      async (message: ConsumeMessage | null) => {
-        if (!message) {
-          return;
-        }
+    const reply =
+      await channel.consume(
+        this.name,
+        async (
+          message: ConsumeMessage | null,
+        ) => {
+          if (!message) {
+            return;
+          }
 
-        const payload = JSON.parse(message.content.toString());
+          try {
+            const payload =
+              JSON.parse(
+                message.content.toString(),
+              );
 
-        await this.consumer!.handler(payload);
+            await this.consumer!.handler(
+              payload,
+            );
 
-        channel.ack(message);
-      },
-      this.consumer.options,
-    );
+            /*
+             * ACK only after the consumer
+             * handler has completed successfully.
+             */
+            channel.ack(message);
+          } catch (error) {
+            /*
+             * Never allow an exception from the
+             * consumer handler to escape the
+             * RabbitMQ callback.
+             *
+             * QueueProcessingError explicitly
+             * controls whether the message should
+             * be requeued.
+             *
+             * All other errors are treated as
+             * transient/infrastructure failures
+             * and are requeued.
+             */
+            const requeue =
+              error instanceof
+                QueueProcessingError
+                ? error.requeue
+                : true;
 
-    this.consumer.tag = reply.consumerTag;
+            channel.nack(
+              message,
+              false,
+              requeue,
+            );
+          }
+        },
+        this.consumer.options,
+      );
+
+    this.consumer.tag =
+      reply.consumerTag;
 
     return reply;
   }
